@@ -57,6 +57,7 @@ local commonWords = {
 -- URL Kamus
 local DICTIONARY_URLS = {
     "https://raw.githubusercontent.com/perlancar/perl-WordList-ID-KBBI/master/lib/WordList/ID/KBBI.pm",
+    "https://raw.githubusercontent.com/geovedi/indonesian-wordlist/refs/heads/master/04-myspell2006-sort-alpha.lst"
 }
 
 -- Daftar cadangan lokal
@@ -68,7 +69,7 @@ local FALLBACK_WORDS = {
     "semburat", "embun", "desa", "kota", "pasar", "perahu",
 }
 
-local MIN_LOAD_COUNT = 500
+local MIN_LOAD_COUNT = 5000
 
 -- VARIABEL GLOBAL =============================================================
 local allWords = {}
@@ -124,7 +125,7 @@ end
 
 -- PENGATURAN GUI ==============================================================
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "MegaWordSearchPro"
+screenGui.Name = "RanzzieKBBI"
 screenGui.ResetOnSpawn = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = playerGui
@@ -177,7 +178,7 @@ headerLabel.Font = Enum.Font.GothamBlack
 headerLabel.TextSize = 16
 headerLabel.TextColor3 = THEME.accent
 headerLabel.TextXAlignment = Enum.TextXAlignment.Left
-headerLabel.Text = "Ranzzie's KBBI Script"
+headerLabel.Text = "KBBI SCRIPT"
 headerLabel.Parent = header
 
 local wordCountLabel = Instance.new("TextLabel")
@@ -529,7 +530,7 @@ local function handleConsoleMessage(message)
     if not consoleAutoComplete then return end
 
     -- Hindari mendeteksi output sendiri
-    if message:find("%[KONSOL%]") or message:find("RANZZIE'S KBBI SCRIPT") or message:find("%[RESET")
+    if message:find("%[KONSOL%]") or message:find("%[MEGA") or message:find("%[RESET")
        or message:find("%[GUI%-SCAN%]") or message:find("%[SISTEM%]") then
         return
     end
@@ -552,88 +553,110 @@ pcall(function()
     end)
 end)
 
--- PEMINDAI GUI (GUI SCANNER) ==================================================
--- Memindai UI game untuk menemukan teks "Hurufnya adalah:" dan huruf di dalamnya
--- Ini menangkap huruf yang ditampilkan sebagai elemen visual, bukan log konsol
+-- PENDENGAR GAME UI (DIRECT TARGETING) ========================================
+-- Path yang diketahui dari scan:
+--   Huruf hint:  MatchUI.BottomUI.TopUI.WordServerFrame.WordServer
+--   Input kata:   MatchUI.BottomUI.TopUI.WordSubmit.Word
+--   Timer:        MatchUI.BottomUI.CenterUI.TimerHealthUI.TimerUI.Timer
 
 local lastDetectedGuiLetter = ""
 local lastDetectedGuiTime = 0
+local wordServerConnection = nil
+local gameMatchUI = nil
 
-local function extractLetterFromText(text)
-    if not text or text == "" then return nil end
+local function findWordServer()
+    -- Cari elemen WordServer secara langsung
+    -- Path: PlayerGui > MatchUI > BottomUI > TopUI > WordServerFrame > WordServer
+    local matchUI = playerGui:FindFirstChild("MatchUI")
+    if not matchUI then return nil end
+    gameMatchUI = matchUI
 
-    -- Pola: "Hurufnya adalah: A" atau "Hurufnya adalah:A"
-    local letter = text:match("[Hh]uruf[%a]*%s+adalah[%s:]*(%a+)")
-    if letter and #letter >= 1 and #letter <= 6 then
-        return letter:upper()
-    end
+    local bottomUI = matchUI:FindFirstChild("BottomUI")
+    if not bottomUI then return nil end
 
-    -- Pola: "Word: A" / "Hint: AB" dll
-    for _, pat in ipairs(LETTER_PATTERNS) do
-        local raw = text:match(pat)
-        if raw and #raw >= 1 and #raw <= 6 then
-            return raw:upper()
-        end
-    end
+    local topUI = bottomUI:FindFirstChild("TopUI")
+    if not topUI then return nil end
 
-    return nil
+    local wordServerFrame = topUI:FindFirstChild("WordServerFrame")
+    if not wordServerFrame then return nil end
+
+    local wordServer = wordServerFrame:FindFirstChild("WordServer")
+    return wordServer
 end
 
-local function scanGuiForLetters()
-    -- Scan semua GUI di PlayerGui (kecuali GUI kita sendiri)
-    for _, gui in ipairs(playerGui:GetChildren()) do
-        if gui:IsA("ScreenGui") and gui.Name ~= "MegaWordSearchPro" then
-            -- Cari semua TextLabel/TextButton di dalam GUI ini
-            for _, desc in ipairs(gui:GetDescendants()) do
-                pcall(function()
-                    if (desc:IsA("TextLabel") or desc:IsA("TextButton")) and desc.Visible then
-                        local text = desc.Text
+local function onWordServerChanged(wordServer)
+    if not consoleAutoComplete then return end
 
-                        -- Cek apakah teks mengandung pola huruf
-                        local letter = extractLetterFromText(text)
-                        if letter then
-                            -- Jika ini huruf baru yang belum dideteksi
-                            if letter ~= lastDetectedGuiLetter or (tick() - lastDetectedGuiTime) > 3 then
-                                lastDetectedGuiLetter = letter
-                                lastDetectedGuiTime = tick()
-                                handleDetectedLetters(letter, "GUI-SCAN")
-                            end
-                            return
-                        end
+    local text = wordServer.Text
+    if not text or text == "" then return end
 
-                        -- Cek apakah ada "Hurufnya adalah" di TextLabel ini,
-                        -- dan hurufnya di TextLabel sibling/child terdekat
-                        if text:lower():find("huruf") and text:lower():find("adalah") then
-                            local parent = desc.Parent
-                            if parent then
-                                for _, sibling in ipairs(parent:GetChildren()) do
-                                    if sibling ~= desc and (sibling:IsA("TextLabel") or sibling:IsA("TextButton")) then
-                                        local sibText = sibling.Text:gsub("%s+", "")
-                                        if #sibText >= 1 and #sibText <= 6 and sibText:match("^%a+$") then
-                                            local foundLetter = sibText:upper()
-                                            if foundLetter ~= lastDetectedGuiLetter or (tick() - lastDetectedGuiTime) > 3 then
-                                                lastDetectedGuiLetter = foundLetter
-                                                lastDetectedGuiTime = tick()
-                                                handleDetectedLetters(foundLetter, "GUI-SCAN")
-                                            end
-                                            return
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end)
+    -- Bersihkan teks: ambil hanya huruf
+    local letters = text:gsub("%s+", ""):upper()
+    if not letters:match("^%a+$") then return end
+    if #letters < 1 or #letters > 6 then return end
+
+    -- Cek apakah ini huruf baru
+    if letters ~= lastDetectedGuiLetter or (tick() - lastDetectedGuiTime) > 2 then
+        lastDetectedGuiLetter = letters
+        lastDetectedGuiTime = tick()
+        handleDetectedLetters(letters, "GAME")
+    end
+end
+
+local function connectWordServer()
+    local wordServer = findWordServer()
+    if wordServer then
+        -- Hapus koneksi lama jika ada
+        if wordServerConnection then
+            pcall(function() wordServerConnection:Disconnect() end)
+        end
+
+        wordServerConnection = wordServer:GetPropertyChangedSignal("Text"):Connect(function()
+            onWordServerChanged(wordServer)
+        end)
+
+        -- Cek teks awal
+        if wordServer.Text and wordServer.Text ~= "" then
+            onWordServerChanged(wordServer)
+        end
+
+        print("[GAME] ✅ WordServer ditemukan dan terhubung!")
+        setStatus("✅ Terhubung ke game UI", THEME.green)
+        return true
+    end
+    return false
+end
+
+-- Coba sambungkan langsung, jika gagal tunggu MatchUI muncul
+task.spawn(function()
+    -- Coba langsung
+    if connectWordServer() then return end
+
+    -- Tunggu MatchUI muncul via DescendantAdded
+    print("[GAME] Menunggu MatchUI muncul...")
+    local waitConn
+    waitConn = playerGui.DescendantAdded:Connect(function(desc)
+        if desc.Name == "WordServer" then
+            task.wait(0.2) -- Tunggu sebentar agar parent-tree siap
+            if connectWordServer() then
+                if waitConn then
+                    pcall(function() waitConn:Disconnect() end)
+                    waitConn = nil
+                end
             end
         end
-    end
-end
+    end)
 
--- Loop pemindai GUI: scan setiap 0.5 detik saat konsol listener aktif
-task.spawn(function()
-    while task.wait(0.5) do
-        if consoleAutoComplete then
-            pcall(scanGuiForLetters)
+    -- Juga coba polling setiap 3 detik selama 60 detik
+    for _ = 1, 20 do
+        task.wait(3)
+        if wordServerConnection then break end
+        if connectWordServer() then
+            if waitConn then
+                pcall(function() waitConn:Disconnect() end)
+                waitConn = nil
+            end
+            break
         end
     end
 end)
@@ -717,14 +740,92 @@ local function loadFromPerlModule(content)
     return added
 end
 
+-- MEMUAT KAMUS DARI GAME INDEX ================================================
+
+
+local function loadFromGameIndex()
+    local menuUI = playerGui:FindFirstChild("MenuUI")
+    if not menuUI then
+        print("[GAME-INDEX] MenuUI tidak ditemukan, skip...")
+        return 0
+    end
+
+    local indexFrame = menuUI:FindFirstChild("IndexFrame")
+    if not indexFrame then
+        print("[GAME-INDEX] IndexFrame tidak ditemukan, skip...")
+        return 0
+    end
+
+    local indexContent = indexFrame:FindFirstChild("IndexContent")
+    if not indexContent then
+        print("[GAME-INDEX] IndexContent tidak ditemukan, skip...")
+        return 0
+    end
+
+    local book = indexContent:FindFirstChild("Book")
+    if not book then
+        print("[GAME-INDEX] Book tidak ditemukan, skip...")
+        return 0
+    end
+
+    local totalAdded = 0
+    local indexCount = 0
+
+    for _, child in ipairs(book:GetChildren()) do
+        -- Cari semua WordIndex* (WordIndexA, WordIndexB, dst)
+        if child.Name:match("^WordIndex") then
+            indexCount = indexCount + 1
+            pcall(function()
+                local scrolling = child:FindFirstChild("IndexScrolling")
+                if not scrolling then return end
+
+                local wordsLabel = scrolling:FindFirstChild("Words")
+                if not wordsLabel then return end
+
+                local text = wordsLabel.Text
+                if not text or text == "" then return end
+
+                -- Parse kata-kata dari teks (satu kata per baris)
+                for word in text:gmatch("[^\r\n]+") do
+                    local clean = sanitizeWord(word)
+                    if clean and addWord(clean) then
+                        totalAdded = totalAdded + 1
+                    end
+                end
+            end)
+        end
+    end
+
+    print("[GAME-INDEX] Ditemukan " .. indexCount .. " indeks, " .. totalAdded .. " kata ditambahkan")
+    return totalAdded
+end
+
 local function loadDictionary()
-    print("[INFO] Mengunduh kamus...")
-    setStatus("⏳ Mengunduh kamus...", THEME.yellow)
+    print("[INFO] Memuat kamus...")
+    setStatus("⏳ Memuat kamus...", THEME.yellow)
     notify("Memuat kamus...")
 
     allWords = {}
     wordSet = {}
 
+    -- PRIORITAS 1: Muat dari kamus bawaan game (paling akurat)
+    local gameWords = loadFromGameIndex()
+    if gameWords > 0 then
+        print("[✓] " .. gameWords .. " kata dimuat dari kamus game (total " .. #allWords .. ")")
+        wordCountLabel.Text = tostring(#allWords) .. " kata 🎮"
+        wordCountLabel.TextColor3 = THEME.green
+        searchBox.PlaceholderText = "🔎 Ketik huruf awal..."
+        setStatus("✅ Kamus game dimuat: " .. #allWords .. " kata", THEME.green)
+        notify("✅ Kamus game dimuat! (" .. #allWords .. " kata)")
+
+        -- Jika kata game sudah cukup, selesai
+        if #allWords >= MIN_LOAD_COUNT then
+            return true
+        end
+        print("[INFO] Kata game kurang dari " .. MIN_LOAD_COUNT .. ", menambah dari KBBI...")
+    end
+
+    -- PRIORITAS 2: Tambahkan dari KBBI.pm (fallback/supplement)
     for i, url in ipairs(DICTIONARY_URLS) do
         local before = #allWords
         local ok, content = pcall(function()
@@ -741,32 +842,46 @@ local function loadDictionary()
                 added = loadFromText(content)
             end
 
-            if added > 0 and #allWords >= MIN_LOAD_COUNT then
-                print("[✓] " .. (#allWords - before) .. " kata ditambah dari sumber #" .. i .. " (total " .. #allWords .. ")")
+            if added > 0 then
+                print("[✓] " .. added .. " kata ditambah dari KBBI #" .. i .. " (total " .. #allWords .. ")")
+            end
+
+            if #allWords >= MIN_LOAD_COUNT then
                 wordCountLabel.Text = tostring(#allWords) .. " kata"
                 wordCountLabel.TextColor3 = THEME.green
                 searchBox.PlaceholderText = "🔎 Ketik huruf awal..."
                 setStatus("✅ Kamus dimuat: " .. #allWords .. " kata", THEME.green)
                 notify("✅ Kamus dimuat! (" .. #allWords .. " kata)")
                 return true
-            else
-                warn("[PERINGATAN] Sumber #" .. i .. " tidak mencukupi (" .. added .. " kata ditambah)")
             end
         else
-            warn("[PERINGATAN] Sumber #" .. i .. " gagal diunduh")
+            warn("[PERINGATAN] Sumber KBBI #" .. i .. " gagal diunduh")
         end
     end
 
-    for _, w in ipairs(FALLBACK_WORDS) do
-        addWord(w)
+    -- PRIORITAS 3: Fallback lokal
+    if #allWords < MIN_LOAD_COUNT then
+        for _, w in ipairs(FALLBACK_WORDS) do
+            addWord(w)
+        end
     end
-    warn("[ERROR] Semua sumber kamus gagal, memakai fallback lokal")
-    wordCountLabel.Text = tostring(#allWords) .. " kata"
-    wordCountLabel.TextColor3 = THEME.yellow
-    searchBox.PlaceholderText = "⚠️ Mode fallback"
-    setStatus("⚠️ Fallback lokal: " .. #allWords .. " kata", THEME.yellow)
-    notify("⚠️ Fallback lokal dipakai (" .. #allWords .. " kata)")
-    return true
+
+    if #allWords > 0 then
+        wordCountLabel.Text = tostring(#allWords) .. " kata"
+        wordCountLabel.TextColor3 = (#allWords >= MIN_LOAD_COUNT) and THEME.green or THEME.yellow
+        searchBox.PlaceholderText = (#allWords >= MIN_LOAD_COUNT) and "🔎 Ketik huruf awal..." or "⚠️ Kata terbatas"
+        setStatus("📖 Kamus: " .. #allWords .. " kata", THEME.yellow)
+        notify("📖 Kamus dimuat (" .. #allWords .. " kata)")
+        return true
+    end
+
+    warn("[ERROR] Semua sumber kamus gagal")
+    wordCountLabel.Text = "0 kata"
+    wordCountLabel.TextColor3 = THEME.red
+    searchBox.PlaceholderText = "❌ Kamus gagal dimuat"
+    setStatus("❌ Gagal memuat kamus", THEME.red)
+    notify("❌ Gagal memuat kamus!")
+    return false
 end
 
 -- PEMBUATAN LABEL KATA ========================================================
@@ -932,7 +1047,7 @@ local function nukeEverything()
     -- Cari dan hapus semua ScreenGui milik script ini (jaga-jaga duplikat)
     pcall(function()
         for _, gui in ipairs(playerGui:GetChildren()) do
-            if gui:IsA("ScreenGui") and gui.Name == "MegaWordSearchPro" then
+            if gui:IsA("ScreenGui") and gui.Name == "RanzzieKBBI" then
                 gui:Destroy()
             end
         end
