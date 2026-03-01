@@ -1,6 +1,6 @@
 -- [Made by ranzzie] -- https://rifatraditya.me/
 
-print("[MEGA PENCARI KATA PRO] Memulai...")
+print("[RANZZIE'S KBBI SCRIPT] Memulai...")
 
 -- LAYANAN =====================================================================
 local Players = game:GetService("Players")
@@ -177,7 +177,7 @@ headerLabel.Font = Enum.Font.GothamBlack
 headerLabel.TextSize = 16
 headerLabel.TextColor3 = THEME.accent
 headerLabel.TextXAlignment = Enum.TextXAlignment.Left
-headerLabel.Text = "KBBI SCRIPT"
+headerLabel.Text = "Ranzzie's KBBI Script"
 headerLabel.Parent = header
 
 local wordCountLabel = Instance.new("TextLabel")
@@ -468,7 +468,7 @@ local rightArrow = makeArrow("▶", 1)
 local function notify(message)
     pcall(function()
         StarterGui:SetCore("SendNotification", {
-            Title = "Mega Pencari Kata Pro",
+            Title = "Ranzzie's KBBI Script",
             Text = message,
             Duration = 3
         })
@@ -529,7 +529,7 @@ local function handleConsoleMessage(message)
     if not consoleAutoComplete then return end
 
     -- Hindari mendeteksi output sendiri
-    if message:find("%[KONSOL%]") or message:find("%[MEGA") or message:find("%[RESET")
+    if message:find("%[KONSOL%]") or message:find("RANZZIE'S KBBI SCRIPT") or message:find("%[RESET")
        or message:find("%[GUI%-SCAN%]") or message:find("%[SISTEM%]") then
         return
     end
@@ -1061,7 +1061,7 @@ end)
 -- MULAI =======================================================================
 task.spawn(function()
     if loadDictionary() then
-        print("[MEGA PENCARI KATA PRO – SIAP]")
+        print("[RANZZIE'S KBBI SCRIPT – SIAP]")
         notify("🚀 Siap! " .. #allWords .. " kata dimuat")
     end
 end)
