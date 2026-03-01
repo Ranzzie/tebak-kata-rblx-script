@@ -10,5 +10,5 @@ Script helper pencari kata untuk game Roblox dengan UI modern, auto-detect huruf
 
 ## Loadstring
 ```lua
-loadstring(game:HttpGet(""))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/Ranzzie/tebak-kata-rblx-script/refs/heads/main/ranzziekbbi.lua"))()
 ```
